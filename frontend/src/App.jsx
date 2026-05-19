@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-const API = '';  // empty = uses proxy to localhost:8000
+const API = 'https://mhtcet-finder-backend.onrender.com';  // empty = uses proxy to localhost:8000
 
 const CATEGORIES = ['OPEN','OBC','SC','ST','EWS','NT1','NT2','NT3','VJ','SEBC','TFWS'];
 const GENDERS    = ['General', 'Ladies'];
