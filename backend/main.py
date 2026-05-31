@@ -14,6 +14,7 @@ from supabase import create_client
 from dotenv import load_dotenv
 from pathlib import Path
 import os
+from typing import List, Optional
 
 # ── Load .env ────────────────────────────────────────────────────────────────
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -32,8 +33,6 @@ app.add_middleware(
 )
 
 # ── Top 5 fixed colleges (shown to everyone regardless of percentile) ────────
-# These are the aspirational/prestige colleges your client wants shown first.
-# Update this list as needed — use the exact college_code from your DB.
 TOP_5_COLLEGE_CODES = [
     "16006",  # COEP Technological University, Pune
     "03012",  # Veermata Jijabai Technological Institute (VJTI), Mumbai
@@ -42,29 +41,45 @@ TOP_5_COLLEGE_CODES = [
     "01002",  # Government College of Engineering, Amravati
 ]
 
+COLLEGE_SELECT = (
+    "college_code, branch_name, category, gender_quota, closing_percentile, "
+    "colleges(college_name, city, college_type, naac_grade, is_autonomous, "
+    "is_nba, is_girls_only, is_minority)"
+)
+
 # ── Request / Response models ────────────────────────────────────────────────
 class RecommendRequest(BaseModel):
-    percentile: float = Field(..., ge=0, le=100, description="MHT CET percentile")
-    category:   str   = Field(..., description="OPEN / OBC / SC / ST / EWS / NT1 / NT2 / NT3 / VJ / SEBC")
-    branch:     str   = Field(..., description="e.g. Computer Science and Engineering")
-    gender:     str   = Field("General", description="General or Ladies")
-    cap_round:  int   = Field(3, description="Which CAP round data to use (1 or 3). Default: 3")
-    window:     float = Field(5.0, description="Percentile window for matching (default ±5)")
+    percentile:    float     = Field(..., ge=0, le=100, description="MHT CET percentile")
+    category:      str       = Field(..., description="OPEN / OBC / SC / ST / EWS / NT1 / NT2 / NT3 / VJ / SEBC")
+    branch:        List[str] = Field(..., description="List of preferred branches")
+    cities:        List[str] = Field(default=[], description="Filter by city")
+    gender:        str       = Field("General", description="General or Ladies")
+    cap_round:     int       = Field(3, description="Which CAP round data to use (1 or 3). Default: 3")
+    window:        float     = Field(5.0, description="Percentile window for matching (default ±5)")
+    seat_type:     str       = Field("all", description='"all", "State", or "Other"')
+    minority_only: bool      = Field(False, description="Filter only minority colleges")
 
 class CollegeResult(BaseModel):
-    college_code:        str
-    college_name:        str
-    branch_name:         str
-    category:            str
-    gender_quota:        str
-    closing_percentile:  float
-    difference:          float   # how far from student's percentile
-    is_top5:             bool
+    college_code:       str
+    college_name:       str
+    branch_name:        str
+    category:           str
+    gender_quota:       str
+    closing_percentile: float
+    difference:         float
+    is_top5:            bool
+    city:               Optional[str] = None
+    college_type:       Optional[str] = None
+    naac_grade:         Optional[str] = None
+    is_autonomous:      bool = False
+    is_nba:             bool = False
+    is_girls_only:      bool = False
+    is_minority:        bool = False
 
 class RecommendResponse(BaseModel):
     percentile:   float
     category:     str
-    branch:       str
+    branch:       List[str]
     top5:         list[CollegeResult]
     personalized: list[CollegeResult]
 
@@ -92,37 +107,62 @@ BRANCH_ALIASES = {
     ],
 }
 
-def fetch_top5(branch: str, category: str, gender: str, cap_round: int) -> list[dict]:
-    """Fetch top 5 colleges — tries exact branch first, then aliases, then CAP1 fallback."""
-    branch_variants = BRANCH_ALIASES.get(branch, [branch])
+def _branch_variants(branches: List[str]) -> list[str]:
+    variants = []
+    for b in branches:
+        variants.extend(BRANCH_ALIASES.get(b, [b]))
+    return list(set(variants))
 
-    for cap in [cap_round, 1]:  # fallback to CAP1 if CAP3 has no data
-        for variant in branch_variants:
-            res = (
-                supabase.table("cutoffs")
-                .select("college_code, branch_name, category, gender_quota, closing_percentile, colleges(college_name)")
-                .in_("college_code", TOP_5_COLLEGE_CODES)
-                .eq("branch_name", variant)
-                .eq("category", category)
-                .eq("gender_quota", gender)
-                .eq("cap_round", cap)
-                .eq("stage", "I")
-                .order("closing_percentile", desc=True)
-                .execute()
-            )
-            if res.data:
-                return res.data
 
-    return []
+def fetch_top5(
+    branches: List[str],
+    category: str,
+    gender: str,
+    cap_round: int,
+    seat_type: str,
+    minority_only: bool,
+    cities: List[str],
+) -> list[dict]:
+    """Fetch top 5 colleges — checks all branch aliases for the requested branches."""
+    branch_variants = _branch_variants(branches)
+
+    results = []
+    for cap in [cap_round, 1]:
+        query = (
+            supabase.table("cutoffs")
+            .select(COLLEGE_SELECT)
+            .in_("college_code", TOP_5_COLLEGE_CODES)
+            .in_("branch_name", branch_variants)
+            .eq("category", category)
+            .eq("gender_quota", gender)
+            .eq("cap_round", cap)
+            .eq("stage", "I")
+        )
+
+        if seat_type != "all":
+            query = query.eq("seat_type", seat_type)
+        if minority_only:
+            query = query.eq("colleges.is_minority", True)
+        if cities:
+            query = query.in_("colleges.city", cities)
+
+        res = query.order("closing_percentile", desc=True).execute()
+        if res.data:
+            results.extend(res.data)
+
+    return results
 
 
 def fetch_personalized(
     percentile: float,
-    branch: str,
+    branches: List[str],
     category: str,
     gender: str,
     cap_round: int,
     window: float,
+    seat_type: str,
+    minority_only: bool,
+    cities: List[str],
 ) -> list[dict]:
     """
     Fetch colleges where last year's closing percentile was within ±window
@@ -132,10 +172,10 @@ def fetch_personalized(
     low  = round(percentile - window, 7)
     high = round(percentile + window, 7)
 
-    res = (
+    query = (
         supabase.table("cutoffs")
-        .select("college_code, branch_name, category, gender_quota, closing_percentile, colleges(college_name)")
-        .eq("branch_name", branch)
+        .select(COLLEGE_SELECT)
+        .in_("branch_name", branches)
         .eq("category", category)
         .eq("gender_quota", gender)
         .eq("cap_round", cap_round)
@@ -143,20 +183,24 @@ def fetch_personalized(
         .gte("closing_percentile", low)
         .lte("closing_percentile", high)
         .not_.in_("college_code", TOP_5_COLLEGE_CODES)
-        .order("closing_percentile", desc=True)
-        .limit(20)
-        .execute()
     )
-    return res.data or []
+
+    if seat_type != "all":
+        query = query.eq("seat_type", seat_type)
+    if minority_only:
+        query = query.eq("colleges.is_minority", True)
+    if cities:
+        query = query.in_("colleges.city", cities)
+
+    res = query.order("closing_percentile", desc=True).limit(50).execute()
+    return [row for row in (res.data or []) if row.get("colleges") is not None]
 
 
 def format_result(row: dict, student_percentile: float, is_top5: bool) -> CollegeResult:
-    college_name = (
-        row.get("colleges", {}).get("college_name", "")
-        if isinstance(row.get("colleges"), dict)
-        else row.get("college_name", "")
-    )
+    colleges_data = row.get("colleges") or {}
+    college_name = colleges_data.get("college_name", "") if isinstance(colleges_data, dict) else ""
     closing = float(row["closing_percentile"])
+
     return CollegeResult(
         college_code=row["college_code"],
         college_name=college_name,
@@ -166,6 +210,13 @@ def format_result(row: dict, student_percentile: float, is_top5: bool) -> Colleg
         closing_percentile=closing,
         difference=round(closing - student_percentile, 2),
         is_top5=is_top5,
+        city=colleges_data.get("city"),
+        college_type=colleges_data.get("college_type"),
+        naac_grade=colleges_data.get("naac_grade"),
+        is_autonomous=colleges_data.get("is_autonomous", False),
+        is_nba=colleges_data.get("is_nba", False),
+        is_girls_only=colleges_data.get("is_girls_only", False),
+        is_minority=colleges_data.get("is_minority", False),
     )
 
 
@@ -175,8 +226,7 @@ def recommend(req: RecommendRequest):
     category = req.category.upper()
     gender   = req.gender.capitalize()
 
-    # Validate category
-    valid_categories = {"OPEN","OBC","SC","ST","EWS","NT1","NT2","NT3","VJ","SEBC","TFWS"}
+    valid_categories = {"OPEN", "OBC", "SC", "ST", "EWS", "NT1", "NT2", "NT3", "VJ", "SEBC", "TFWS"}
     if category not in valid_categories:
         raise HTTPException(400, f"Invalid category '{category}'. Must be one of: {valid_categories}")
 
@@ -184,17 +234,25 @@ def recommend(req: RecommendRequest):
     if gender not in valid_genders:
         raise HTTPException(400, f"Invalid gender '{gender}'. Must be General or Ladies.")
 
-    # Fetch top 5 fixed colleges
-    top5_rows = fetch_top5(req.branch, category, gender, req.cap_round)
+    top5_rows = fetch_top5(
+        req.branch, category, gender, req.cap_round, req.seat_type, req.minority_only, req.cities
+    )
     top5 = [format_result(r, req.percentile, is_top5=True) for r in top5_rows]
 
-    # Fetch personalized colleges (±window)
+    seen_top5 = set()
+    dedup_top5 = []
+    for t in top5:
+        key = f"{t.college_code}::{t.branch_name}"
+        if key not in seen_top5:
+            seen_top5.add(key)
+            dedup_top5.append(t)
+    top5 = dedup_top5
+
     personalized_rows = fetch_personalized(
-        req.percentile, req.branch, category, gender, req.cap_round, req.window
+        req.percentile, req.branch, category, gender, req.cap_round, req.window,
+        req.seat_type, req.minority_only, req.cities,
     )
     personalized = [format_result(r, req.percentile, is_top5=False) for r in personalized_rows]
-
-    # Sort personalized by closest match
     personalized.sort(key=lambda x: abs(x.difference))
 
     return RecommendResponse(
@@ -210,13 +268,17 @@ def recommend(req: RecommendRequest):
 @app.get("/branches")
 def list_branches():
     """Returns all unique branch names — for populating the frontend dropdown."""
-    res = (
-        supabase.table("cutoffs")
-        .select("branch_name")
-        .execute()
-    )
+    res = supabase.table("cutoffs").select("branch_name").execute()
     branches = sorted(set(r["branch_name"] for r in res.data))
     return {"branches": branches}
+
+
+@app.get("/cities")
+def list_cities():
+    """Returns distinct non-null cities from colleges table, sorted alphabetically."""
+    res = supabase.table("colleges").select("city").execute()
+    cities = sorted(set(r["city"] for r in res.data if r["city"]))
+    return {"cities": cities}
 
 
 @app.get("/health")

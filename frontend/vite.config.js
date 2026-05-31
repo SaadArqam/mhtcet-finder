@@ -8,6 +8,7 @@ export default defineConfig({
       '/recommend': 'http://localhost:8000',
       '/branches': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
+      '/cities': 'http://localhost:8000',
     }
   }
 })
