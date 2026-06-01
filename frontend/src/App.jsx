@@ -12,24 +12,86 @@ const SEAT_TYPES = [
 ];
 const MAX_BRANCHES = 5;
 const MAX_CITIES   = 3;
-const MAX_COMPARE  = 3;
+
+function getChance(difference) {
+  if (difference <= -5) return { label: 'High Chance',      bg: '#e8f5e9', color: '#1b5e20', border: '#a5d6a7' };
+  if (difference <= -2) return { label: 'Good Chance',      bg: '#f1f8e9', color: '#33691e', border: '#c5e1a5' };
+  if (difference <= 1)  return { label: 'Moderate',         bg: '#fff8e1', color: '#e65100', border: '#ffe082' };
+  if (difference <= 3)  return { label: 'Reach',            bg: '#fff3e0', color: '#bf360c', border: '#ffcc80' };
+  return                       { label: 'Ambitious Reach',  bg: '#fce4ec', color: '#880e4f', border: '#f48fb1' };
+}
+
+function getChanceCategory(difference) {
+  if (difference <= -2) return 'safe';
+  if (difference <= 1) return 'moderate';
+  return 'reach';
+}
+
+function formatCutoffDiff(difference) {
+  if (difference > 0) return `${difference.toFixed(1)} above cutoff`;
+  if (difference < 0) return `${Math.abs(difference).toFixed(1)} below cutoff`;
+  return 'exact match';
+}
 
 const PRINT_CSS = `
+.print-only { display: none; }
+
 @media print {
+  @page { margin: 20mm 15mm; }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
   body { background: #fff !important; margin: 0; }
-  .no-print { display: none !important; }
+  .app-page { background: #fff !important; padding: 0 !important; }
+
+  .no-print,
+  [data-noprint] { display: none !important; }
+
   .print-only { display: block !important; }
-  .print-header { margin-bottom: 20px; border-bottom: 2px solid #1a1a1a; padding-bottom: 12px; }
-  .print-header h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
-  .print-header p  { font-size: 12px; color: #555; margin: 2px 0; }
-  .college-card-print { border: 1px solid #ccc; border-radius: 8px; padding: 12px 16px;
-    margin-bottom: 8px; display: flex; justify-content: space-between; page-break-inside: avoid; }
-  .section-title-print { font-size: 15px; font-weight: 700; margin: 18px 0 8px;
-    border-left: 3px solid #1a1a1a; padding-left: 10px; }
+
+  .print-header { margin-bottom: 16px; }
+  .print-header h2 { font-size: 20px; font-weight: 700; margin: 0 0 8px; color: #1a1a1a; }
+  .print-header p { font-size: 11px; color: #333; margin: 0 0 12px; line-height: 1.5; }
+  .print-header hr { border: none; border-top: 1.5px solid #e0ded8; margin: 0 0 16px; }
+
+  .print-section-title {
+    font-size: 15px; font-weight: 700; margin: 20px 0 10px;
+    border-left: 3px solid #1a1a1a; padding-left: 10px; color: #1a1a1a;
+  }
   .print-section-break { page-break-before: always; }
-  .college-card { box-shadow: none !important; width: 100% !important; }
+
+  .college-card {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    box-shadow: none !important;
+    width: 100% !important;
+    border: 1px solid #e0ded8 !important;
+  }
+
+  .chance-badge {
+    display: inline-block !important;
+    padding: 3px 10px !important;
+    border-radius: 20px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+  }
+
+  .tag-chip {
+    display: inline-block !important;
+    padding: 2px 7px !important;
+    border-radius: 5px !important;
+    font-size: 10px !important;
+    font-weight: 600 !important;
+    margin-right: 4px !important;
+    margin-top: 4px !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+  }
 }
-@media screen { .print-only { display: none !important; } }
 `;
 
 const s = {
@@ -121,10 +183,27 @@ const s = {
   collegeMeta: { fontSize: 12, color: '#9a9a90', display: 'flex', gap: 8, flexWrap: 'wrap' },
   metaChip: { background: '#f0efe9', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 500, color: '#5a5a52' },
 
-  percentileBlock: { textAlign: 'right', flexShrink: 0 },
+  percentileBlock: { textAlign: 'right', flexShrink: 0, minWidth: 88 },
   percentileValue: { fontSize: 18, fontWeight: 600, color: '#1a1a1a', letterSpacing: '-0.5px' },
-  percentileLabel: { fontSize: 10, color: '#9a9a90', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' },
-  diffChip: { fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 6, marginTop: 4, display: 'inline-block' },
+  percentileLabel: { fontSize: 10, color: '#9a9a90', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 },
+  chanceBadge: {
+    fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+    display: 'inline-block', marginTop: 2, whiteSpace: 'nowrap',
+  },
+  chanceDiffText: { fontSize: 10, color: '#9a9a90', marginTop: 4, lineHeight: 1.3 },
+
+  chanceSummary: {
+    fontSize: 12, color: '#7a7a72', marginTop: -8, marginBottom: 14,
+    display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6,
+  },
+  chanceFilterChip: {
+    fontSize: 12, padding: '2px 8px', borderRadius: 6, cursor: 'pointer',
+    border: '1.5px solid transparent', background: 'transparent', fontFamily: "'DM Sans', sans-serif",
+    color: '#7a7a72',
+  },
+  chanceFilterChipActive: {
+    background: '#f0efe9', borderColor: '#e0ded8', color: '#1a1a1a', fontWeight: 600,
+  },
 
   emptyState: { textAlign: 'center', padding: '40px 20px', color: '#9a9a90', fontSize: 14 },
   error: { background: '#fff3f3', border: '1.5px solid #ffcdd2', borderRadius: 12, padding: '14px 18px', fontSize: 14, color: '#c62828', marginTop: 16 },
@@ -139,20 +218,28 @@ const s = {
   },
 };
 
-if (!document.getElementById('__mhtcet_print_css')) {
-  const style = document.createElement('style');
-  style.id = '__mhtcet_print_css';
-  style.textContent = PRINT_CSS;
-  document.head.appendChild(style);
+function ensurePrintStyles() {
+  let style = document.getElementById('__mhtcet_print_css');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = '__mhtcet_print_css';
+    document.head.appendChild(style);
+  }
+  style.innerHTML = PRINT_CSS;
 }
+
+ensurePrintStyles();
 
 function TagChip({ label, color, bg }) {
   return (
-    <span style={{
-      fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 5,
-      background: bg, color, marginRight: 4, marginTop: 4,
-      display: 'inline-block', textTransform: 'uppercase', letterSpacing: '0.05em',
-    }}>
+    <span
+      className="tag-chip"
+      style={{
+        fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 5,
+        background: bg, color, marginRight: 4, marginTop: 4,
+        display: 'inline-block', textTransform: 'uppercase', letterSpacing: '0.05em',
+      }}
+    >
       {label}
     </span>
   );
@@ -234,9 +321,7 @@ function MultiSelect({ options, selected, onToggle, placeholder, max, label }) {
 
 function CollegeCard({ college, isTop5 }) {
   const diff = college.difference;
-  const diffColor = Math.abs(diff) <= 1 ? '#2e7d32' : Math.abs(diff) <= 3 ? '#e65100' : '#5a5a52';
-  const diffBg    = Math.abs(diff) <= 1 ? '#e8f5e9'  : Math.abs(diff) <= 3 ? '#fff3e0' : '#f0efe9';
-  const diffText  = diff > 0 ? `+${diff.toFixed(1)} above you` : diff < 0 ? `${Math.abs(diff).toFixed(1)} below you` : 'exact match';
+  const chance = getChance(diff);
 
   const tags = [];
   if (college.college_type === 'Government') tags.push({ label: 'Government', color: '#1565c0', bg: '#e3f2fd' });
@@ -271,18 +356,31 @@ function CollegeCard({ college, isTop5 }) {
         <div style={s.percentileValue}>{college.closing_percentile.toFixed(1)}</div>
         <div style={s.percentileLabel}>%ile cutoff</div>
         {!isTop5 && (
-          <div style={{ ...s.diffChip, color: diffColor, background: diffBg }}>{diffText}</div>
+          <>
+            <div
+              className="chance-badge"
+              style={{
+                ...s.chanceBadge,
+                background: chance.bg,
+                color: chance.color,
+                border: `1.5px solid ${chance.border}`,
+              }}
+            >
+              {chance.label}
+            </div>
+            <div style={s.chanceDiffText}>{formatCutoffDiff(diff)}</div>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-function SectionHeader({ title, badgeColor, badgeBg, badgeText }) {
+function SectionHeader({ title, badgeColor, badgeBg, badgeText, className = '' }) {
   return (
-    <div style={s.sectionHeader}>
+    <div style={s.sectionHeader} className={className}>
       <span style={s.sectionTitle}>{title}</span>
-      <span style={{ ...s.sectionBadge, color: badgeColor, background: badgeBg }}>{badgeText}</span>
+      <span data-noprint="true" style={{ ...s.sectionBadge, color: badgeColor, background: badgeBg }}>{badgeText}</span>
     </div>
   );
 }
@@ -301,6 +399,7 @@ export default function App() {
   const [error, setError]       = useState('');
   const [btnHover, setBtnHover] = useState(false);
   const [pdfHover, setPdfHover] = useState(false);
+  const [chanceFilter, setChanceFilter] = useState(null);
 
   useEffect(() => {
     fetch(`${API}/branches`).then(r => r.json()).then(d => setBranchOptions(d.branches || [])).catch(() => {});
@@ -333,6 +432,7 @@ export default function App() {
     setError('');
     setLoading(true);
     setResults(null);
+    setChanceFilter(null);
 
     try {
       const res = await fetch(`${API}/recommend`, {
@@ -359,72 +459,49 @@ export default function App() {
     }
   };
 
-  const seatLabel = SEAT_TYPES.find(st => st.value === form.seat_type)?.label || form.seat_type;
+  const personalized = results?.personalized || [];
+  const safeCount = personalized.filter(c => getChanceCategory(c.difference) === 'safe').length;
+  const moderateCount = personalized.filter(c => getChanceCategory(c.difference) === 'moderate').length;
+  const reachCount = personalized.filter(c => getChanceCategory(c.difference) === 'reach').length;
 
-  const PrintSummary = () => (
-    <div className="print-only">
-      <div className="print-header">
-        <h1>MHT CET College Finder</h1>
-        <p>
-          <strong>Percentile:</strong> {form.percentile} &nbsp;|&nbsp;
-          <strong>Category:</strong> {form.category} &nbsp;|&nbsp;
-          <strong>Gender:</strong> {form.gender} &nbsp;|&nbsp;
-          <strong>CAP Round:</strong> {form.cap_round} &nbsp;|&nbsp;
-          <strong>Seat Type:</strong> {seatLabel}
-          {form.minority_only && <span> &nbsp;|&nbsp; <strong>Minority Only</strong></span>}
-        </p>
-        <p><strong>Branches:</strong> {form.branches.join(', ')}</p>
-        {form.cities.length > 0 && <p><strong>Cities:</strong> {form.cities.join(', ')}</p>}
-      </div>
+  const filteredPersonalized = chanceFilter
+    ? personalized.filter(c => getChanceCategory(c.difference) === chanceFilter)
+    : personalized;
 
-      <div className="section-title-print">Aspirational Colleges</div>
-      {results?.top5.map((c, i) => (
-        <div key={i} className="college-card-print">
-          <div>
-            <strong style={{ fontSize: 13 }}>{c.college_name}</strong>
-            <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>
-              {c.branch_name} · {c.category}{c.city ? ` · ${c.city}` : ''}
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <strong>{c.closing_percentile.toFixed(1)}</strong>
-            <div style={{ fontSize: 10, color: '#888' }}>%ile cutoff</div>
-          </div>
-        </div>
-      ))}
+  const toggleChanceFilter = (category) => {
+    setChanceFilter(prev => (prev === category ? null : category));
+  };
 
-      <div className="section-title-print print-section-break">Your Best Matches</div>
-      {results?.personalized.map((c, i) => (
-        <div key={i} className="college-card-print">
-          <div>
-            <strong style={{ fontSize: 13 }}>{c.college_name}</strong>
-            <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>
-              {c.branch_name} · {c.category}{c.city ? ` · ${c.city}` : ''}
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <strong>{c.closing_percentile.toFixed(1)}</strong>
-            <div style={{ fontSize: 10, color: '#888' }}>%ile cutoff</div>
-          </div>
-        </div>
-      ))}
-      <p style={{ fontSize: 10, color: '#999', marginTop: 24 }}>
-        Based on 2024 CAP Round data · Always verify on the official DTE Maharashtra website
+  const handlePrint = () => {
+    ensurePrintStyles();
+    window.print();
+  };
+
+  const PrintHeader = () => (
+    <div className="print-only print-header">
+      <h2>MHT CET College Finder</h2>
+      <p>
+        <strong>Percentile:</strong> {form.percentile} &nbsp;|&nbsp;
+        <strong>Category:</strong> {form.category} &nbsp;|&nbsp;
+        <strong>Branches:</strong> {form.branches.join(', ')} &nbsp;|&nbsp;
+        <strong>Cities:</strong> {form.cities.length > 0 ? form.cities.join(', ') : 'All'} &nbsp;|&nbsp;
+        <strong>CAP Round:</strong> {form.cap_round}
       </p>
+      <hr />
     </div>
   );
 
   return (
-    <div style={s.page}>
+    <div style={s.page} className="app-page">
       <div style={s.container}>
-        <PrintSummary />
+        {results && <PrintHeader />}
 
-        <div style={s.header} className="no-print">
+        <div style={s.header} data-noprint="true">
           <div style={s.logo}>MHT CET Finder</div>
-          <div style={s.subtitle} className="no-print">Find colleges based on your 2024 CAP round cutoffs</div>
+          <div style={s.subtitle} data-noprint="true">Find colleges based on your 2024 CAP round cutoffs</div>
         </div>
 
-        <div style={s.card} className="no-print">
+        <div style={s.card} data-noprint="true">
           <div style={s.cardTitle}>Your Details</div>
 
           <div style={{ ...s.grid2, marginBottom: 14 }}>
@@ -505,7 +582,7 @@ export default function App() {
 
           <button
             style={{ ...s.btn, opacity: btnHover ? 0.85 : 1 }}
-            className="no-print"
+            data-noprint="true"
             onMouseEnter={() => setBtnHover(true)}
             onMouseLeave={() => setBtnHover(false)}
             onClick={handleSearch}
@@ -516,48 +593,85 @@ export default function App() {
         </div>
 
         {loading && (
-          <div style={s.loadingRow} className="no-print">Searching colleges…</div>
+          <div style={s.loadingRow} data-noprint="true">Searching colleges…</div>
         )}
 
         {results && (
           <>
-            <div style={s.resultsHeader} className="no-print">
+            <div style={s.resultsHeader} data-noprint="true">
               <div style={s.resultsTitle}>Your Results</div>
               <button
                 style={{ ...s.pdfBtn, background: pdfHover ? '#f7f6f3' : '#fff' }}
-                className="no-print"
+                data-noprint="true"
                 onMouseEnter={() => setPdfHover(true)}
                 onMouseLeave={() => setPdfHover(false)}
-                onClick={() => window.print()}
+                onClick={handlePrint}
               >
                 Download PDF
               </button>
             </div>
 
             <SectionHeader title="Aspirational Colleges" badgeColor="#1565c0" badgeBg="#e3f2fd" badgeText="Top picks" />
-            <div className="no-print">
-              {results.top5.length === 0
-                ? <div style={s.emptyState}>No data for this branch in top colleges.</div>
-                : results.top5.map((c, i) => <CollegeCard key={i} college={c} isTop5 />)
-              }
-            </div>
+            {results.top5.length === 0
+              ? <div style={s.emptyState} data-noprint="true">No data for this branch in top colleges.</div>
+              : results.top5.map((c, i) => <CollegeCard key={i} college={c} isTop5 />)
+            }
 
             <SectionHeader
+              className="print-section-break"
               title="Your Best Matches"
               badgeColor="#2e7d32" badgeBg="#e8f5e9"
-              badgeText={`${results.personalized.length} college${results.personalized.length !== 1 ? 's' : ''}`}
+              badgeText={`${personalized.length} college${personalized.length !== 1 ? 's' : ''}`}
             />
-            <div style={{ fontSize: 12, color: '#9a9a90', marginBottom: 14, marginTop: -6 }} className="no-print">
+            {personalized.length > 0 && (
+              <div style={s.chanceSummary} data-noprint="true">
+                <button
+                  type="button"
+                  style={{
+                    ...s.chanceFilterChip,
+                    ...(chanceFilter === 'safe' ? s.chanceFilterChipActive : {}),
+                  }}
+                  onClick={() => toggleChanceFilter('safe')}
+                >
+                  🟢 {safeCount} High/Good Chance
+                </button>
+                <span style={{ color: '#c8c8c0' }}>·</span>
+                <button
+                  type="button"
+                  style={{
+                    ...s.chanceFilterChip,
+                    ...(chanceFilter === 'moderate' ? s.chanceFilterChipActive : {}),
+                  }}
+                  onClick={() => toggleChanceFilter('moderate')}
+                >
+                  🟡 {moderateCount} Moderate
+                </button>
+                <span style={{ color: '#c8c8c0' }}>·</span>
+                <button
+                  type="button"
+                  style={{
+                    ...s.chanceFilterChip,
+                    ...(chanceFilter === 'reach' ? s.chanceFilterChipActive : {}),
+                  }}
+                  onClick={() => toggleChanceFilter('reach')}
+                >
+                  🔴 {reachCount} Reach
+                </button>
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: '#9a9a90', marginBottom: 14, marginTop: personalized.length > 0 ? 0 : -6 }} data-noprint="true">
               Within ±{form.window} percentile of your score ({results.percentile}%ile)
             </div>
-            <div className="no-print">
-              {results.personalized.length === 0
-                ? <div style={s.emptyState}>No colleges found. Try widening your search or removing filters.</div>
-                : results.personalized.map((c, i) => <CollegeCard key={i} college={c} isTop5={false} />)
-              }
-            </div>
+            {personalized.length === 0
+              ? <div style={s.emptyState} data-noprint="true">No colleges found. Try widening your search or removing filters.</div>
+              : filteredPersonalized.length === 0
+                ? <div style={s.emptyState} data-noprint="true">No colleges in this category. Click the filter again to show all.</div>
+                : filteredPersonalized.map((c, i) => (
+                    <CollegeCard key={`${c.college_code}-${c.branch_name}-${i}`} college={c} isTop5={false} />
+                  ))
+            }
 
-            <div style={s.disclaimer} className="no-print">
+            <div style={s.disclaimer} data-noprint="true">
               Based on 2024 CAP Round data · Cutoffs may vary ±5–10 points each year<br />
               Always verify on the official DTE Maharashtra website
             </div>
