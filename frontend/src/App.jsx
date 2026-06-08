@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 
-const API = '';
+const API = import.meta.env.VITE_API_URL;
 
 const CATEGORIES = ['OPEN','OBC','SC','ST','EWS','NT1','NT2','NT3','VJ','SEBC','TFWS'];
 const GENDERS    = ['General', 'Ladies'];
